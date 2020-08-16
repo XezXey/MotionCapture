@@ -37,8 +37,6 @@ def get_depth(trajectory_df, cam_params):
   This function will return the points in camera space and screen space
   - This projectionMatrix use in unity screen convention : (0, 0) is in the bottom-left
   '''
-  print("#"*100)
-  print("Get depth
   worldToCameraMatrix = np.array(cam_params['Extrinsic_unity'])
   projectionMatrix = np.array(cam_params['projectionMatrix'])
   # Remove the clip space that we don't use in unprojection of real cameras
@@ -47,9 +45,9 @@ def get_depth(trajectory_df, cam_params):
   # Plane space
   world_space = np.hstack((trajectory_df[['ball_plane_x', 'ball_plane_y', 'ball_plane_z']].values, np.ones(trajectory_df.shape[0]).reshape(-1, 1)))
   # Negate the z-axis to make Mocap and Unity are the same convention 
-  world_space[:, 2] *= -1
+  # world_space[:, 2] *= -1
   # Uncomment this to test the particular points
-  # plane_space = np.array([[0, 0, 0, 1],
+  # world_space = np.array([[0, 0, 0, 1],
                           # [-21.2, 0.1, 0, 1],
                           # [-21.2, 0.1, 33, 1],
                           # [2, 0, 33, 1],
@@ -57,16 +55,13 @@ def get_depth(trajectory_df, cam_params):
                           # [-20.5, 0, -11.1, 1],
                           # [-22.9, 0, 39.6, 1]])
   # WorldToCameraMatrix : Plane space -> Camera space (u*depth, v*depth, depth, 1)
-  print(worldToCameraMatrix.T)
-  print(worldToCameraMatrix)
-  camera_space = plane_space @ worldToCameraMatrix.T
+  # In the unity depth is in the +z direction, so we need to negate the z direction that came from multiplied with extrinsic
+  camera_space = world_space @ worldToCameraMatrix.T
   trajectory_df['ball_camera_x'] = camera_space[:, 0]
   trajectory_df['ball_camera_y'] = camera_space[:, 1]
-  trajectory_df['ball_camera_depth'] = camera_space[:, 2]
+  trajectory_df['ball_camera_depth'] = -camera_space[:, 2]
+
   # projectionMatrix : Camera space -> NDC Space
-  # print("DEPTH : ", camera_space)
-  # print("DEPTH DISPLACEMENT : ", np.diff(camera_space, axis=0))
-  # print("PLANE : ", plane_space)
   # In the unity, projection matrix didn't give the output as the screen space but it will in the NDC space(We'll see the world in range(-1, 1))
   # Then we need to unnormalized it to ge the screen space
   ndc_space = camera_space @ projectionMatrix.T
@@ -77,7 +72,7 @@ def get_depth(trajectory_df, cam_params):
   # print("V :", v)
   # print("Depth : ", camera_space[:, -2])
   trajectory_df['ball_screen_unity_u_project'] = u
-  trajectory_df['ball_screen_unity_v_project'] = camera_properties_dict['h'] - v
+  trajectory_df['ball_screen_unity_v_project'] = v
   return trajectory_df
 
 def unproject(trajectory_df, cam_params):
@@ -85,6 +80,8 @@ def unproject(trajectory_df, cam_params):
   Trying to unproject the point by given the (u, v and depth) -> world coordinates
   - This projectionMatrix use in unity screen convention : (0, 0) is in the bottom-left
   '''
+  print("#" * 100)
+  print("[###] Unprojection to verify the projection-unprojection, transformation matrix")
   eps = np.finfo(float).eps
   # Get the projectionMatrix
   projectionMatrix = np.array(cam_params['projectionMatrix'])
@@ -96,13 +93,13 @@ def unproject(trajectory_df, cam_params):
   cameraToWorldMatrix = np.linalg.inv(worldToCameraMatrix)
   # The (u, v and depth) from the get_depth() function
   depth = trajectory_df['ball_camera_depth'].values.reshape(-1, 1)
-  u = trajectory_df['ball_screen_unity_u_project'].values.reshape(-1, 1)
-  v = trajectory_df['ball_screen_unity_v_project'].values.reshape(-1, 1)
+  u_unity = trajectory_df['ball_screen_unity_u_project'].values.reshape(-1, 1)
+  v_unity = trajectory_df['ball_screen_unity_v_project'].values.reshape(-1, 1)
 
   # The screen space will be : (u*depth, v*depth, depth, 1)
-  screen_space = np.hstack((np.multiply(u, depth), np.multiply(v, depth), depth, np.ones(u.shape)))
+  screen_space = np.hstack((np.multiply(u_unity, depth), np.multiply(v_unity, depth), depth, np.ones(u_unity.shape)))
   print("PARAMS SHAPE : ", projectionMatrix.shape, worldToCameraMatrix.shape)
-  print("DATA SHAPE : ", screen_space.shape, depth.shape, u.shape, v.shape)
+  print("DATA SHAPE : ", screen_space.shape, depth.shape, u_unity.shape, v_unity.shape)
 
   '''
   PROJECTION
@@ -111,19 +108,21 @@ def unproject(trajectory_df, cam_params):
   [#####] Note : Don't multiply if use the perspective projection matrix from intrinsic
   '''
 
+  print('='*40 + 'Projection checking...' + '='*40)
   # Get the world coordinates : (X, Y, Z, 1)
-  plane_space = np.hstack((trajectory_df[['ball_plane_x', 'ball_plane_y', 'ball_plane_z']], np.ones(trajectory_df.shape[0]).reshape(-1, 1)))
-  # worldToCameraMatrix : Plane space -> Camera space (u*depth, v*depth, depth, 1)
-  camera_space = plane_space @ worldToCameraMatrix.T
+  world_space = np.hstack((trajectory_df[['ball_plane_x', 'ball_plane_y', 'ball_plane_z']], np.ones(trajectory_df.shape[0]).reshape(-1, 1)))
+  # worldToCameraMatrix : World space -> Camera space (u*depth, v*depth, depth, 1)
+  camera_space = world_space @ worldToCameraMatrix.T
   # projectionMatrix : Camera space -> NDC space (u and v) in range(-1, 1)
   ndc_space = camera_space @ projectionMatrix.T
   ndc_space[:, :-1] /= ndc_space[:, 2].reshape(-1, 1)
   # Get the Screen space from unnormalized the NDC space
   screen_space = ndc_space.copy()
   # We need to subtract the camera_properties_dict['w'] out of the ndc_space since the Extrinisc is inverse from the unity. So this will make x-axis swapped and need to subtract it to get the same 3D reconstructed points : 
-  screen_space[:, 0] = camera_properties_dict['w'] - ((ndc_space[:, 0]) + 1) * (camera_properties_dict['w']/2)
+  screen_space[:, 0] = ((ndc_space[:, 0]) + 1) * (camera_properties_dict['w']/2)
   screen_space[:, 1] = ((ndc_space[:, 1]) + 1) * (camera_properties_dict['h']/2)
-  print("[#] Equality check of screen space (u, v) : ", np.all((screen_space[:, 0].reshape(-1, 1) - u) <= eps), ", ", np.all((screen_space[:, 1].reshape(-1, 1) - v) <= eps))
+  # The answer should be : True, True
+  print("[#] Equality check of screen space (u, v) with projection : ", np.all(np.isclose(screen_space[:, 0].reshape(-1, 1), u_unity)), ", ", np.all(np.isclose(screen_space[:, 1].reshape(-1, 1), v_unity)))
 
   '''
   UNPROJECTION
@@ -131,7 +130,7 @@ def unproject(trajectory_df, cam_params):
   '''
   # Target value
   target_camera_space = np.hstack((trajectory_df['ball_camera_x'].values.reshape(-1, 1), trajectory_df['ball_camera_y'].values.reshape(-1, 1), depth))
-  target_plane_space = np.hstack((trajectory_df['ball_plane_x'].values.reshape(-1, 1), trajectory_df['ball_plane_y'].values.reshape(-1, 1),
+  target_world_space = np.hstack((trajectory_df['ball_plane_x'].values.reshape(-1, 1), trajectory_df['ball_plane_y'].values.reshape(-1, 1),
                                   trajectory_df['ball_plane_z'].values.reshape(-1, 1)))
 
   # [Screen, Depth] -> Plane
@@ -145,25 +144,25 @@ def unproject(trajectory_df, cam_params):
   ndc_space = (ndc_space * 2) - 1
 
   # NDC space -> CAMERA space (u*depth, v*depth, depth, 1)
-  # ndc_space = np.hstack((np.multiply(ndc_space[:, 0].reshape(-1, 1), screen_space[:, 2].reshape(-1, 1)), np.multiply(ndc_space[:, 1].reshape(-1, 1), screen_space[:, 2].reshape(-1, 1)), screen_space[:, 2].reshape(-1, 1), np.ones(ndc_space.shape[0]).reshape(-1, 1)))
   ndc_space = np.hstack((np.multiply(ndc_space[:, 0].reshape(-1, 1), depth), np.multiply(ndc_space[:, 1].reshape(-1, 1), depth), depth, np.ones(ndc_space.shape[0]).reshape(-1, 1)))
-  camera_space =  ndc_space @ (np.linalg.inv(projectionMatrix)).T
+  projectionMatrix_inv = np.linalg.inv(projectionMatrix)
+  camera_space =  ndc_space @ projectionMatrix_inv.T
   # CAMERA space -> Plane space
-  # cameraToWorldMatrix[:, 0] *= -1
-  # cameraToWorldMatrix[:, 2] *= -1
-  plane_space =  camera_space @ cameraToWorldMatrix.T
+  world_space =  camera_space @ cameraToWorldMatrix.T
   # Store the plane unproject to dataframe
-  trajectory_df.loc[:, 'ball_plane_x_unproject'] = plane_space[:, 0]
-  trajectory_df.loc[:, 'ball_plane_y_unproject'] = plane_space[:, 1]
-  trajectory_df.loc[:, 'ball_plane_z_unproject'] = plane_space[:, 2]
-  print('='*40 + 'Unproject' + '='*40)
-  print('Screen : {}\nCamera : {}\nPlane : {}'.format(screen_space[0].reshape(-1), target_camera_space[0].reshape(-1), target_plane_space[0].reshape(-1)))
+  trajectory_df.loc[:, 'ball_plane_x_unity'] = world_space[:, 0]
+  trajectory_df.loc[:, 'ball_plane_y_unity'] = world_space[:, 1]
+  trajectory_df.loc[:, 'ball_plane_z_unity'] = world_space[:, 2]
+  print('='*40 + 'Unprojection checking...' + '='*40)
+  print('Screen : {}\nCamera : {}\nPlane : {}'.format(screen_space[0].reshape(-1), target_camera_space[0].reshape(-1), target_world_space[0].reshape(-1)))
   print('\n[#]===> Target Camera unprojection : ', target_camera_space[0].reshape(-1))
   print('Screen -> Camera (By projectionMatrix) : ', camera_space[0].reshape(-1))
   print('[Screen, depth] : ', camera_space[0].reshape(-1))
-  print('\n[#]===> Target Plane unprojection : ', target_plane_space[3])
-  print('Screen -> Plane (By inverse the projectionMatrix) : ', plane_space[3])
+  print('\n[#]===> Target Plane unprojection : ', target_world_space[3])
+  print('Screen -> Plane (By inverse the projectionMatrix) : ', world_space[3])
+  print("[#] Equality check of world space (x, y, z) : ", np.all(np.isclose(world_space[:, 0].reshape(-1, 1), trajectory_df['ball_plane_x'].values.reshape(-1, 1))), ", ", np.all(np.isclose(world_space[:, 1].reshape(-1, 1), trajectory_df['ball_plane_y'].values.reshape(-1, 1))), ", ", np.all(np.isclose(world_space[:, 2].reshape(-1, 1), trajectory_df['ball_plane_z'].values.reshape(-1, 1))))
   print('='*89)
+  # exit()
   return trajectory_df
 
 def visualize_trajectory(trajectory_df):
@@ -186,14 +185,14 @@ def visualize_trajectory(trajectory_df):
   fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_screen_unity_u_project'])-1), y=np.diff(trajectory_df['ball_screen_unity_u_project']), mode='lines', marker=marker_dict_u, name="Displacement - u"), row=2, col=1)
   fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_screen_unity_v_project'])-1), y=np.diff(trajectory_df['ball_screen_unity_v_project']), mode='lines', marker=marker_dict_v, name="Displacement - v"), row=2, col=1)
   fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_camera_depth'])-1), y=np.diff(trajectory_df['ball_camera_depth']), mode='lines', marker=marker_dict_depth, name="Displacement - Depth"), row=2, col=1)
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_camera_depth'])-1), y=trajectory_df['ball_camera_depth'], mode='lines', marker=marker_dict_depth, name="Depth"), row=2, col=1)
+  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_camera_depth'])-1), y=np.diff(trajectory_df['ball_camera_depth']), mode='lines', marker=marker_dict_depth, name="Depth"), row=2, col=1)
   # EOT
   fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['EOT'])), y=trajectory_df['EOT'], mode='lines', marker=marker_dict_eot, name="EOT"), row=2, col=2)
   fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['EOT'])), y=trajectory_df['EOT'], mode='lines', marker=marker_dict_eot, name="EOT"), row=2, col=1)
   # World
   fig.add_trace(go.Scatter3d(x=trajectory_df['ball_plane_x'], y=trajectory_df['ball_plane_y'], z=trajectory_df['ball_plane_z'], mode='markers+lines', marker=marker_dict_gt, name="Motion capture (World coordinates)"), row=1, col=2)
   if not args.label:
-    fig.add_trace(go.Scatter3d(x=trajectory_df['ball_plane_x_unproject'], y=trajectory_df['ball_plane_y_unproject'], z=trajectory_df['ball_plane_z_unproject'], mode='markers+lines', marker=marker_dict_pred, name="Unproject trajectory (World coordinates)"), row=1, col=2)
+    fig.add_trace(go.Scatter3d(x=trajectory_df['ball_plane_x_unity'], y=trajectory_df['ball_plane_y_unity'], z=trajectory_df['ball_plane_z_unity'], mode='markers+lines', marker=marker_dict_pred, name="Unproject trajectory (World coordinates)"), row=1, col=2)
   return fig
 
 def load_config_file(folder_name, idx):
@@ -279,7 +278,7 @@ def preprocess_split_eot(trajectory_df, camera_properties_dict):
   length_threshold = 150
   max_x = 60
   max_z = 50
-  max_y = 15
+  max_y = 20
   # Split by nan
   trajectory_split = np.split(trajectory_df, np.where(np.isnan(trajectory_df['ball_plane_x']))[0])
   # removing NaN entries
@@ -413,7 +412,11 @@ if __name__ == '__main__':
         # The return from split_by_nan() is the list of splitted dataframe
         trajectory_df[traj_type] = preprocess_split_eot(trajectory_df[traj_type], camera_properties_dict)
         # Get the depth, screen position in unity
+        print("#"*100)
+        print("[###] Get depth from XYZ motion capture using Extrinsic (Move to camera space)")
         trajectory_df[traj_type] = [get_depth(trajectory_df[traj_type][i], camera_properties_dict) for i in range(len(trajectory_df[traj_type]))]
+
+        # Manually label if the flag is specified
         if args.label:
           print("Manually label trajectory file...")
           for j in range(len(trajectory_df[traj_type])):
@@ -432,7 +435,6 @@ if __name__ == '__main__':
     # Save the .npy files in shape and formation that ready to use in train/test
     for traj_type in trajectory_df.keys():
       print("Preprocessed trajectory shape : ", trajectory_npy[traj_type].shape)
-      print(trajectory_npy[traj_type][0][:2, [4, 5]])
       np.save(file=output_path + "/{}Trajectory_Trial{}.npy".format(traj_type, trial_index[i]), arr=trajectory_npy[traj_type])
 
       # Save the .npy of labeled EOT
