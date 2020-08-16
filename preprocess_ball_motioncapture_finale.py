@@ -57,11 +57,12 @@ def get_depth(trajectory_df, cam_params):
   camera_space = world_space @ worldToCameraMatrix.T
   trajectory_df['ball_camera_x'] = camera_space[:, 0]
   trajectory_df['ball_camera_y'] = camera_space[:, 1]
-  trajectory_df['ball_camera_depth'] = -camera_space[:, 2]
+  # trajectory_df['ball_camera_depth'] = -camera_space[:, 2]
   # projectionMatrix : Camera space -> NDC Space
   # In the unity, projection matrix didn't give the output as the screen space but it will in the NDC space(We'll see the world in range(-1, 1))
   # Then we need to unnormalized it to ge the screen space
   ndc_space = camera_space @ projectionMatrix.T
+  trajectory_df['ball_camera_depth'] = ndc_space[:, 2]
   # Get the screen coordinates
   u = ((ndc_space[:, 0]/ndc_space[:, 2]) + 1) * (camera_properties_dict['w']/2)
   v = ((ndc_space[:, 1]/ndc_space[:, 2]) + 1) * (camera_properties_dict['h']/2)
@@ -119,7 +120,7 @@ def proj_unproj_verify(trajectory_df, cam_params):
   print("[#] Equality check of screen space (u, v) with projection : ", np.all(np.isclose(screen_space[:, 0].reshape(-1, 1), u_unity)), ", ", np.all(np.isclose(screen_space[:, 1].reshape(-1, 1), v_unity)))
 
   '''
-  proj_unproj_verifyION
+  UNPROJECTION
   U, V, Depth (UNITY) ===> X, Y, Z (UNITY)
   '''
   # Target value
