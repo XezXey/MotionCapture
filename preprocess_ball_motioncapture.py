@@ -161,6 +161,14 @@ def proj_unproj_verify(trajectory_df, cam_params):
   return trajectory_df
 
 def visualize_trajectory(trajectory_df):
+  print('=' * 100)
+  print('[#] Visualization')
+  print('Shape : ', trajectory_df.shape)
+  print('Example of data : ')
+  print(trajectory_df[['ball_screen_unity_u_project', 'ball_screen_unity_v_project', 'EOT']].tail(5))
+  print(np.diff(trajectory_df[['ball_screen_unity_u_project', 'ball_screen_unity_v_project', 'EOT']].tail(5).values, axis=0))
+  print('=' * 100)
+  seq_len = trajectory_df.shape[0]
   # marker properties of uv, xyz
   marker_dict_gt = dict(color='rgba(0, 0, 255, 0.4)', size=7)
   marker_dict_pred = dict(color='rgba(255, 0, 0, 0.4)', size=7)
@@ -168,25 +176,21 @@ def visualize_trajectory(trajectory_df):
   marker_dict_u = dict(color='rgba(200, 0, 0, 0.4)', size=7)
   marker_dict_v = dict(color='rgba(0, 125, 0, 0.4)', size=7)
   marker_dict_depth = dict(color='rgba(0, 0, 255, 0.4)', size=7)
-  marker_dict_u_sav = dict(color='rgba(200, 100, 128, 0.7)', size=7)
-  marker_dict_v_sav = dict(color='rgba(34, 100, 39, 0.7)', size=7)
-  marker_dict_depth_sav = dict(color='rgba(128, 100, 255, 0.7)', size=7)
-  marker_dict_uv_filtered = dict(color='rgba(0, 0, 255, 0.4)', size=7)
   marker_dict_eot = dict(color='rgba(0, 0, 255, 0.7)', size=7)
   fig = make_subplots(rows=2, cols=2, specs=[[{'type':'scatter'}, {'type':'scatter3d'}], [{'type':'scatter'}, {'type':'scatter'}]])
   # Screen
   fig.add_trace(go.Scatter(x=trajectory_df['ball_screen_unity_u_project'], y=trajectory_df['ball_screen_unity_v_project'], mode='markers+lines', marker=marker_dict_pred, name="Trajectory (Screen coordinates proj_unproj_verify)"), row=1, col=1)
   # Displacement
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_screen_unity_u_project'])-1), y=np.diff(trajectory_df['ball_screen_unity_u_project']), mode='lines', marker=marker_dict_u, name="Displacement - u"), row=2, col=1)
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_screen_unity_v_project'])-1), y=np.diff(trajectory_df['ball_screen_unity_v_project']), mode='lines', marker=marker_dict_v, name="Displacement - v"), row=2, col=1)
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_camera_depth'])-1), y=np.diff(trajectory_df['ball_camera_depth']), mode='lines', marker=marker_dict_depth, name="Displacement - Depth"), row=2, col=1)
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['ball_camera_depth'])-1), y=np.diff(trajectory_df['ball_camera_depth']), mode='lines', marker=marker_dict_depth, name="Depth"), row=2, col=1)
+  fig.add_trace(go.Scatter(x=np.arange(seq_len-1), y=np.diff(trajectory_df['ball_screen_unity_u_project']), mode='lines', marker=marker_dict_u, name="Displacement - u"), row=2, col=1)
+  fig.add_trace(go.Scatter(x=np.arange(seq_len-1), y=np.diff(trajectory_df['ball_screen_unity_v_project']), mode='lines', marker=marker_dict_v, name="Displacement - v"), row=2, col=1)
+  fig.add_trace(go.Scatter(x=np.arange(seq_len-1), y=np.diff(trajectory_df['ball_camera_depth']), mode='lines', marker=marker_dict_depth, name="Displacement - Depth"), row=2, col=1)
+  fig.add_trace(go.Scatter(x=np.arange(seq_len-1), y=np.diff(trajectory_df['ball_camera_depth']), mode='lines', marker=marker_dict_depth, name="Depth"), row=2, col=1)
   # EOT
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['EOT'])), y=trajectory_df['EOT'], mode='lines', marker=marker_dict_eot, name="EOT"), row=2, col=2)
-  fig.add_trace(go.Scatter(x=np.arange(len(trajectory_df['EOT'])), y=trajectory_df['EOT'], mode='lines', marker=marker_dict_eot, name="EOT"), row=2, col=1)
+  fig.add_trace(go.Scatter(x=np.arange(seq_len-1), y=trajectory_df.loc[1:, 'EOT'], mode='lines', marker=marker_dict_eot, name="EOT"), row=2, col=2)
+  fig.add_trace(go.Scatter(x=np.arange(seq_len-1), y=trajectory_df.loc[1:, 'EOT'], mode='lines', marker=marker_dict_eot, name="EOT"), row=2, col=1)
   # World
   fig.add_trace(go.Scatter3d(x=trajectory_df['ball_plane_x'], y=trajectory_df['ball_plane_y'], z=trajectory_df['ball_plane_z'], mode='markers+lines', marker=marker_dict_gt, name="Motion capture (World coordinates)"), row=1, col=2)
-  if not args.label:
+  if not args.label or not args.load_label:
     fig.add_trace(go.Scatter3d(x=trajectory_df['ball_plane_x_unity'], y=trajectory_df['ball_plane_y_unity'], z=trajectory_df['ball_plane_z_unity'], mode='markers+lines', marker=marker_dict_pred, name="proj_unproj_verify trajectory (World coordinates)"), row=1, col=2)
   return fig
 
@@ -271,6 +275,7 @@ def preprocess_split_eot(trajectory_df, camera_properties_dict):
   '''
   ground_threshold = 0.025
   length_threshold = 150
+  # Maximum possible size of pitch in unity
   max_x = 60
   max_z = 50
   max_y = 15
@@ -280,8 +285,6 @@ def preprocess_split_eot(trajectory_df, camera_properties_dict):
   trajectory_split = [each_traj[~np.isnan(each_traj['ball_plane_x'])] for each_traj in trajectory_split if not isinstance(each_traj, np.ndarray)]
   # removing empty DataFrames
   trajectory_split = [each_traj for each_traj in trajectory_split if not each_traj.empty]
-  # removing too short(blinking point) in DataFrames
-  trajectory_split = [each_traj for each_traj in trajectory_split if (len(each_traj) > length_threshold)]
   # Remove some dataset that have an start artifact and an end artifact
   ground_annotated = [np.where((trajectory_split[i]['ball_plane_y'].values < ground_threshold) == True)[0] for i in range(len(trajectory_split))]
 
@@ -315,8 +318,8 @@ def preprocess_split_eot(trajectory_df, camera_properties_dict):
 
   print("Number of all trajectory : ", len(trajectory_split))
 
-  # Remove the point that stay outside the screen
-  trajectory_split_clean = [each_traj for each_traj in trajectory_split_clean if (np.all(each_traj[['ball_screen_opencv_u', 'ball_screen_opencv_v']] > np.finfo(float).eps) and np.all(each_traj[['ball_screen_opencv_u']] < camera_properties_dict['w']) and np.all(each_traj[['ball_screen_opencv_v']] < camera_properties_dict['h']))]
+  # Remove the point that stay outside the screen and too short(blinking point).
+  trajectory_split_clean = [each_traj for each_traj in trajectory_split_clean if (np.all(each_traj[['ball_screen_opencv_u', 'ball_screen_opencv_v']] > np.finfo(float).eps) and np.all(each_traj[['ball_screen_opencv_u']] < camera_properties_dict['w']) and np.all(each_traj[['ball_screen_opencv_v']] < camera_properties_dict['h']) and each_traj.shape[0] >= length_threshold)]
 
   print("Number of all trajectory(Inside the screen) : ", len(trajectory_split_clean))
   print("#" * 100)
@@ -325,7 +328,13 @@ def preprocess_split_eot(trajectory_df, camera_properties_dict):
 def manually_label_eot(trajectory):
   fig = visualize_trajectory(trajectory)
   fig.show()
-  eot_annotated = [int(x) for x in input("Input the index of EOT (Available indexing = {}) : ".format(trajectory.index)).split()]
+  unsuccessful_label = True
+  while unsuccessful_label:
+    eot_annotated = np.array([int(x) for x in input("Input the index of EOT (Available indexing = {}) : ".format(trajectory.index)).split()])
+    if np.all(eot_annotated < trajectory.shape[0]):
+      unsuccessful_label = False
+    else: print("[#]Annotation index is out-of-bounds, Re-annotate...")
+
   trajectory['EOT'][eot_annotated] = True
   return trajectory['EOT'].values
 
@@ -339,7 +348,7 @@ def computeDisplacement(trajectory_df, trajectory_type):
                                                        np.diff(trajectory_df[traj_type][i].drop(drop_cols, axis=1).values, axis=0))),
                                             trajectory_df[traj_type][i]['EOT'].values.reshape(-1, 1))) for i in range(len(trajectory_df[traj_type]))]
 
-    if args.label:
+    if args.label or args.load_label:
       # Use the eot_filtered_index to cut the trajectory
       eot_filtered_index = [np.where(trajectory_npy[traj_type][idx][:, -1] == True)[0][-1] for idx in range(len(trajectory_df[traj_type]))]
       trajectory_npy[traj_type] = [trajectory_npy[traj_type][idx][:eot_filtered_index[idx]+1, :] for idx in range(len(trajectory_df[traj_type]))]
@@ -354,8 +363,6 @@ def computeDisplacement(trajectory_df, trajectory_type):
 
   # Reindex following : x=0, y=1, z=2, u=3, v=4, depth=5, eot=-1
   trajectory_npy[traj_type] = np.array([trajectory_npy[traj_type][i][:, rearrange_index] for i in range(len(trajectory_npy[traj_type]))])
-  # Remove the trajectory that have lengths <= 100  
-  trajectory_npy[traj_type] = np.array([trajectory for trajectory in trajectory_npy[traj_type] if trajectory.shape[0] > 100])
 
   return trajectory_npy
 
@@ -424,9 +431,11 @@ if __name__ == '__main__':
         elif args.load_label:
           print("Loading label file...")
           labeled_eot = np.load(dataset_folder[i] + "/{}Trajectory_ball_motioncapture_Trial{}_EOT_Labeled.npy".format(traj_type, trial_index[i]), allow_pickle=True)
+          print("#N trajectory : ", len(trajectory_df[traj_type]))
+          print("#N labeled EOT : ", labeled_eot.shape[0])
           for idx in range(labeled_eot.shape[0]):
-            print(trajectory_df[traj_type][idx].shape)
-            print(labeled_eot[idx].shape)
+            print("Trajectory : ", trajectory_df[traj_type][idx].shape)
+            print("Loaded labeled : ", labeled_eot[idx].shape)
             trajectory_df[traj_type][idx]['EOT'][:labeled_eot[idx].shape[0]] = labeled_eot[idx].reshape(-1).astype(bool)
             end_points = np.where(trajectory_df[traj_type][idx]['EOT'] == True)[-1][-1] + 1
             trajectory_df[traj_type][idx] = trajectory_df[traj_type][idx][:end_points]
@@ -453,13 +462,6 @@ if __name__ == '__main__':
     trajectory_plot = pd.DataFrame(data=np.cumsum(trajectory_npy['Mixed'][vis_idx].copy(), axis=0),
                                    columns=['ball_plane_x', 'ball_plane_y', 'ball_plane_z', 'ball_screen_unity_u_project', 'ball_screen_unity_v_project', 'ball_camera_depth', 'ball_camera_y', 'ball_camera_x', 'ball_screen_opencv_u', 'ball_screen_opencv_v', 'EOT'])
 
-    # With remove the first local minima 
     trajectory_plot = proj_unproj_verify(trajectory_df=trajectory_plot, cam_params=camera_properties_dict)
     fig = visualize_trajectory(trajectory_df=trajectory_plot)
     fig.show()
-
-    # Without remove the first local minima 
-    # trajectory_plot = proj_unproj_verify(trajectory_df=trajectory_df['Mixed'][vis_idx], cam_params=camera_properties_dict)
-    # fig = visualize_trajectory(trajectory_df=trajectory_plot)
-    # fig.show()
-
